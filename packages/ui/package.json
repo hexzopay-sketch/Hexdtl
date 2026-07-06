@@ -1,0 +1,16 @@
+{
+  "name": "@hexdtl/ui",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.tsx",
+  "dependencies": {
+    "@hexdtl/core": "^0.1.0",
+    "@hexdtl/console": "^0.1.0",
+    "@hexdtl/runtime": "^0.1.0",
+    "@hexdtl/network": "^0.1.0",
+    "@hexdtl/sources": "^0.1.0",
+    "ink": "^7.1.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.7"
+  }
+}

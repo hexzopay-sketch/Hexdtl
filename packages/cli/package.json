@@ -1,0 +1,19 @@
+{
+  "name": "@hexdtl/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "hexdtl": "bin/hexdtl.js"
+  },
+  "main": "src/index.ts",
+  "dependencies": {
+    "@hexdtl/core": "^0.1.0",
+    "@hexdtl/transport": "^0.1.0",
+    "@hexdtl/runtime": "^0.1.0",
+    "@hexdtl/network": "^0.1.0",
+    "@hexdtl/sources": "^0.1.0",
+    "@hexdtl/ui": "^0.1.0",
+    "@hexdtl/beautifier": "^0.1.0",
+    "commander": "^14.0.3"
+  }
+}

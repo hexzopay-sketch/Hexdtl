@@ -1,0 +1,10 @@
+{
+  "name": "@hexdtl/console",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@hexdtl/core": "^0.1.0",
+    "@hexdtl/runtime": "^0.1.0"
+  }
+}

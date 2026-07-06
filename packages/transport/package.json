@@ -1,0 +1,13 @@
+{
+  "name": "@hexdtl/transport",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@hexdtl/core": "^0.1.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}
