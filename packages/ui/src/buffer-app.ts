@@ -1,3 +1,5 @@
+import { readFileSync, statSync } from "node:fs";
+import { join, resolve, dirname } from "node:path";
 import { TerminalRenderer, InputHandler, THEME, ScreenBuffer, type KeyInfo } from "@hexdtl/core";
 import type { EventBus, ConsoleEvent, ExceptionEvent, ExecutionEvent, NetworkEvent, SourceScript } from "@hexdtl/core";
 import type {
@@ -16,8 +18,9 @@ import { renderXOMPanel } from "./panels/xom-panel.js";
 import { renderInjectPanel } from "./panels/inject-panel.js";
 import { renderHexEditPanel } from "./panels/hexedit-panel.js";
 import { renderDebuggerPanel } from "./panels/debugger-panel.js";
+import { renderFileManagerPanel, initFileManagerState, refreshFileManagerState, type FileManagerState } from "./panels/file-manager-panel.js";
 
-export type PanelId = "runtime" | "console" | "network" | "sources" | "xom" | "inject" | "hexedit" | "debugger";
+export type PanelId = "runtime" | "console" | "network" | "sources" | "xom" | "inject" | "hexedit" | "debugger" | "filemgr";
 
 interface AppState {
   panel: PanelId;
@@ -56,6 +59,7 @@ interface AppState {
       networkDetailExpanded: boolean;
       networkDetailScroll: number;
       networkDetailScrollX: number;
+  fileMgr: FileManagerState;
 }
 
 export type FeedItem =
@@ -86,9 +90,10 @@ const PANELS: Array<{ id: PanelId; label: string; key: string }> = [
   { id: "inject", label: "Inject", key: "F6" },
   { id: "hexedit", label: "HexEdit", key: "F7" },
   { id: "debugger", label: "Debug", key: "F8" },
+  { id: "filemgr", label: "Files", key: "F9" },
 ];
 
-const PANEL_ORDER: PanelId[] = ["runtime", "console", "network", "sources", "xom", "inject", "hexedit", "debugger"];
+const PANEL_ORDER: PanelId[] = ["runtime", "console", "network", "sources", "xom", "inject", "hexedit", "debugger", "filemgr"];
 
 const MAX_FEED = 2000;
 const MAX_NETWORK = 500;
@@ -135,6 +140,8 @@ const COMMANDS: Record<string, string> = {
   beautify: "beautify selected source",
   decrypt: "decrypt/rewrite encrypted code",
   split: "toggle split-screen mode",
+  files: "switch to File Manager panel",
+  filemgr: "switch to File Manager panel",
 };
 
 export class BufferApp {
@@ -208,9 +215,11 @@ export class BufferApp {
       networkDetailExpanded: false,
       networkDetailScroll: 0,
       networkDetailScrollX: 0,
+      fileMgr: initFileManagerState(),
     };
 
     PANEL_ORDER.forEach(p => { this.state.scrollTop[p] = 0; });
+    refreshFileManagerState(this.state.fileMgr);
   }
 
   async start(): Promise<void> {
@@ -483,7 +492,7 @@ export class BufferApp {
     // F1-F8 — direct panel switch
     const fnMap: Record<string, PanelId> = {
       f1: "runtime", f2: "console", f3: "network", f4: "sources",
-      f5: "xom", f6: "inject", f7: "hexedit", f8: "debugger",
+      f5: "xom", f6: "inject", f7: "hexedit", f8: "debugger", f9: "filemgr",
     };
     if (key.name in fnMap) {
       const target = fnMap[key.name];
@@ -612,6 +621,8 @@ export class BufferApp {
       this.handleXOMInput(key);
     } else if (this.state.panel === "debugger") {
       this.handleDebuggerInput(key);
+    } else if (this.state.panel === "filemgr") {
+      this.handleFileMgrInput(key);
     } else if (key.char && !key.ctrl && !key.meta && key.char >= " " && key.name !== "tab") {
       if (this.state.panel === "runtime" || this.state.panel === "network" || this.state.panel === "sources") {
         this.state.cmdMode = true;
@@ -895,6 +906,105 @@ export class BufferApp {
     }
   }
 
+  private handleFileMgrInput(key: KeyInfo): void {
+    const fm = this.state.fileMgr;
+    if (key.name === "return" || key.name === "enter") {
+      const entry = fm.entries[fm.cursor];
+      if (!entry) return;
+      if (entry.isDir) {
+        const target = entry.name === ".." ? fm.cwd : join(fm.cwd, entry.name);
+        const resolved = resolve(target);
+        try {
+          statSync(resolved); // ensure accessible
+          fm.cwd = resolved;
+          refreshFileManagerState(fm);
+          this.setStatus(fm.cwd);
+        } catch {
+          this.setStatus("cannot access " + resolved);
+        }
+      } else {
+        // Open file: try to launch in editor using sources panel mechanism
+        const absPath = join(fm.cwd, entry.name);
+        try {
+          const source = readFileSync(absPath, "utf-8");
+          this.state.editor = {
+            scriptId: "file:" + absPath,
+            url: absPath,
+            source,
+            modified: false,
+            cursorRow: 0,
+            cursorCol: 0,
+            scrollTop: 0,
+          };
+          this.state.panel = "hexedit";
+          this.setStatus("opened " + entry.name);
+        } catch {
+          this.setStatus("cannot open " + entry.name);
+        }
+      }
+      this.dirty = true;
+      return;
+    }
+    if (key.name === "backspace") {
+      const parent = dirname(fm.cwd);
+      if (parent !== fm.cwd) {
+        fm.cwd = parent;
+        refreshFileManagerState(fm);
+        this.setStatus(fm.cwd);
+        this.dirty = true;
+      }
+      return;
+    }
+    if (key.name === "up") {
+      if (fm.cursor > 0) fm.cursor--;
+      this.ensureFileMgrVisible();
+      this.dirty = true;
+      return;
+    }
+    if (key.name === "down") {
+      if (fm.cursor < fm.entries.length - 1) fm.cursor++;
+      this.ensureFileMgrVisible();
+      this.dirty = true;
+      return;
+    }
+    if (key.name === "home") {
+      fm.cursor = 0;
+      fm.scroll = 0;
+      this.dirty = true;
+      return;
+    }
+    if (key.name === "end") {
+      fm.cursor = Math.max(0, fm.entries.length - 1);
+      this.ensureFileMgrVisible();
+      this.dirty = true;
+      return;
+    }
+    if (key.name === "pageup") {
+      const pageSize = this.getContentHeight();
+      fm.cursor = Math.max(0, fm.cursor - pageSize);
+      this.ensureFileMgrVisible();
+      this.dirty = true;
+      return;
+    }
+    if (key.name === "pagedown") {
+      const pageSize = this.getContentHeight();
+      fm.cursor = Math.min(fm.entries.length - 1, fm.cursor + pageSize);
+      this.ensureFileMgrVisible();
+      this.dirty = true;
+      return;
+    }
+  }
+
+  private ensureFileMgrVisible(): void {
+    const fm = this.state.fileMgr;
+    const contentHeight = this.getContentHeight() - 1;
+    if (fm.cursor < fm.scroll) {
+      fm.scroll = fm.cursor;
+    } else if (fm.cursor >= fm.scroll + contentHeight) {
+      fm.scroll = fm.cursor - contentHeight + 1;
+    }
+  }
+
   // ── Command mode ─────────────────────────────────────────────
 
   private handleCmdInput(key: KeyInfo): void {
@@ -972,6 +1082,7 @@ export class BufferApp {
       inject: "inject",
       edit: "hexedit", hexedit: "hexedit",
       dbg: "debugger", debugger: "debugger",
+      files: "filemgr", filemgr: "filemgr", fm: "filemgr",
     };
 
     if (main === "xom" && args.length > 0) {
@@ -1460,6 +1571,7 @@ export class BufferApp {
       case "xom": return xomRoot ? Math.max(0, 30 - contentHeight) : 0;
       case "hexedit": return editor ? Math.max(0, editor.source.split("\n").length - contentHeight) : 0;
       case "debugger": return this.state.debugger ? Math.max(0, 20 - contentHeight) : 0;
+      case "filemgr": return Math.max(0, this.state.fileMgr.entries.length - contentHeight);
       default: return 0;
     }
   }
@@ -1628,6 +1740,9 @@ export class BufferApp {
         break;
       case "debugger":
         renderDebuggerPanel(buf, x, y, w, h, this.state.debugger, scroll);
+        break;
+      case "filemgr":
+        renderFileManagerPanel(buf, x, y, w, h, this.state.fileMgr, scroll);
         break;
     }
   }
@@ -1867,6 +1982,7 @@ export class BufferApp {
         inject: " type code  Ctrl+M to run  :cmd",
         hexedit: " ↑↓:nav  Esc:close  :beautify  :decrypt",
         debugger: " F5:continue  F10:step  F11:into  :break file:line",
+        filemgr: " ↑↓:nav  Enter:open  Bksp:parent  :cmd",
       };
       const hint = hints[this.state.panel] || " :cmd  Tab:switch";
       buf.writeString(0, inputY, this.renderer.truncate(hint, cols), THEME.dimText);
@@ -1922,6 +2038,7 @@ export class BufferApp {
       case "inject": return `${injectHistory.length} injections`;
       case "hexedit": return this.state.editor ? `${this.state.editor.source.split("\n").length}L` : "idle";
       case "debugger": return this.state.debugger ? `${this.state.debugger.breakpoints.length} BPs` : "idle";
+      case "filemgr": return `${this.state.fileMgr.entries.length} entries`;
       default: return "";
     }
   }
