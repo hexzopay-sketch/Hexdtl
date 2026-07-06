@@ -83,6 +83,17 @@ install_hexdtl() {
   cp -a "$src_dir/." "$INSTALL_DIR/"
   chmod -R u+w "$INSTALL_DIR"
 
+  # Drop explicit @rolldown/binding-* deps from the root package.json —
+  # rolldown itself declares these as optionalDependencies and npm will
+  # install whichever binding matches the host CPU/OS. The explicit dep
+  # in our package.json pins a single platform (x64-gnu) and blocks
+  # install on ARM, Termux, musl, etc.
+  if [[ "$(uname -m)" != "x86_64" ]]; then
+    info "Removing platform-specific rolldown binding (not needed on $(uname -m))..."
+    local pkg="$INSTALL_DIR/package.json"
+    sed -i '/"@rolldown\/binding-/d' "$pkg"
+  fi
+
   info "Installing npm dependencies..."
   cd "$INSTALL_DIR"
   npm install 2>&1 | tail -5
